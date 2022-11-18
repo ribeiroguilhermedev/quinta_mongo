@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose')
 var ObjectId = require('mongodb').ObjectID;
 const router = express.Router();
 
@@ -32,16 +33,88 @@ router.get('/academia', async function (req, res, next) {
   }
 });
 
+router.get('/treinos', async function (req, res, next) {
+  const { sid } = req.query
+
+  var rs = await global.db.collection("treino").find({ aluno: new ObjectId(sid) }).toArray()
+
+  var rs = await global.db.collection("treino").aggregate([
+    { $match: { aluno: mongoose.Types.ObjectId(sid) } },
+    {
+      $lookup:
+      {
+        from: "personal",
+        localField: "responsavel",
+        foreignField: "_id",
+        as: "rs"
+      }
+    }
+  ]).toArray()
+
+  res.status(200).send(rs)
+});
+
+
+
 router.get('/user', async function (req, res, next) {
   const { sid } = req.query
-  var rs = await global.db.collection("aluno").find({ _id: new ObjectId(sid) }).toArray()
+
+  var objid = mongoose.Types.ObjectId(sid)
+  var tipo = 'aluno'
+  var rs = await global.db.collection("aluno").aggregate([
+    { $match: { _id: objid } },
+    {
+      $lookup:
+      {
+        from: "academia",
+        localField: "academia",
+        foreignField: "_id",
+        as: "rs"
+      }
+    }
+  ]).toArray()
+  console.log(rs);
 
   if (rs.length === 0) {
     rs = await global.db.collection("personal").find({ _id: new ObjectId(sid) }).toArray()
+    tipo = 'personal'
   }
 
   if (rs.length > 0) {
-    res.status(200).send(rs[0])
+    res.status(200).send({ ...rs[0], tipo: tipo })
+  } else {
+    res.sendStatus(400)
+  }
+});
+
+
+
+router.get('/usuarios', async function (req, res, next) {
+  var rs = await global.db.collection("aluno").aggregate([
+    {
+      $lookup:
+      {
+        from: "academia",
+        localField: "academia",
+        foreignField: "_id",
+        as: "rs"
+      }
+    }
+  ]).toArray()
+
+  var arr = []
+
+  for (item of rs) {
+    arr.push({
+      ...item,
+      value: item._id.toString(),
+      label: item.nome
+    })
+  }
+
+
+  if (arr.length > 0) {
+    res.status(200).send(arr)
   } else {
     res.sendStatus(400)
   }
@@ -107,7 +180,7 @@ router.post('/cadastro/aluno', async function (req, res, next) {
       .db
       .collection("aluno")
       .insertOne(
-        { ...req.body }
+        { ...req.body, academia: new ObjectId(req.body.academia) }
       )
 
     var { login, senha } = req.body
@@ -120,5 +193,36 @@ router.post('/cadastro/aluno', async function (req, res, next) {
   }
 
 });
+
+
+router.post('/finalizado', async function (req, res, next) {
+  var { _id, finalizado } = req.body
+  console.log(req.body);
+  var id = mongoose.Types.ObjectId(_id)
+  try {
+    await global
+    .db
+    .collection("treino")
+    .updateOne(
+      { _id: id },
+      {
+        $set: {
+          "finalizado": !finalizado
+        }
+      }
+    )
+
+    res.sendStatus(200)
+  } catch (error) {
+    console.log(error, 'erro');
+    res.sendStatus(400)
+  }
+  
+  
+
+
+});
+
+
 
 module.exports = router;
